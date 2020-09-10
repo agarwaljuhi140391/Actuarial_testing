@@ -1,0 +1,167 @@
+SDM notes:
+PAMB
+No plans to enhance asset share rollforward, true-up approach. IS THIS GOING TO WORK FOR VFA WITH-PROFITS?!
+Resourcing issue
+PACS
+Training clarity
+PLAI
+Training - what do they want to build in ETL exactly?
+
+6-7460000029473
+6-8730000029371
+
+[‎20/‎04/‎2020 5:26 PM]  Moore, Ross Haydon James:  
+hi eric
+I'm taking a look at your divident adj spreadsheet, and have a couple of quick questions
+ 
+[‎20/‎04/‎2020 5:27 PM]  Moore, Ross Haydon James:  
+the pre-calculated deterministic cashflows from the liability side comes in the form of around 48 different cashflow types (e.g. PREM_INC, CASHD_INC, etc.) and 61 "Idx_Cflow" numbers.
+What are these cashflow indices? what do they represent?
+ 
+[‎20/‎04/‎2020 5:46 PM]  Li, Eric Chi Nok:  
+It's just an index to map to each liability segment that adopts flexing. One Idx_Cflow (or 'CFLOW_IDX') is mapped in one segment, each representing one product group. One or more segments are then mapped to one bonus series. 
+You could find the mapping the LIAB table in "Table_LIAB" tab
+Say, for the Idx_Cflow = 61 you are referring to, it's for segment #67 under bonus series #48
+ 
+[‎20/‎04/‎2020 5:52 PM]  Moore, Ross Haydon James:  
+So segment 67 is what, from a liability product / policy point of view?
+ 
+[‎20/‎04/‎2020 5:53 PM]  Moore, Ross Haydon James:  
+and what happens with the 9999 values?
+ 
+[‎20/‎04/‎2020 5:54 PM]  Li, Eric Chi Nok:  
+9999 means n/a typically
+for CFLOW_IDX, they are actually universal life products that adopt "external liability appraoch", which is the approach that AIA does not use, as described in Gary's email
+ 
+[‎20/‎04/‎2020 5:56 PM]  Moore, Ross Haydon James:  
+so the bonus series (e.g. AN USD, A-Series USD) are linked to a particular segment / SP_CODE?
+ 
+[‎20/‎04/‎2020 5:56 PM]  Li, Eric Chi Nok:  
+for PROD_SERIES, on top of that, it could be non-par products that does not require dividend adjustment 
+so the bonus series (e.g. AN USD, A-Series USD) are linked to a particular segment / SP_CODE? 
+>> They are linked to one or more liability segments 
+ 
+[‎20/‎04/‎2020 5:58 PM]  Li, Eric Chi Nok:  
+e.g. both segments #56 (USD PROMISE) & #58 (USD ICON) are mapped to bonus series 19 (PROM_ICON_USD)
+ 
+[‎20/‎04/‎2020 5:59 PM]  Moore, Ross Haydon James:  
+and so in this model we calculate all the future cashflows for the liabilities, aggregate them to the SP_CODE level but still with month-by-month detail
+ 
+[‎20/‎04/‎2020 6:00 PM]  Li, Eric Chi Nok:  
+to be more exact, "aggregate them to the product group level"
+or ALS segment level
+ 
+[‎20/‎04/‎2020 6:01 PM]  Moore, Ross Haydon James:  
+what's the difference, in terms of the model runs or input MPF, between the Table_DET_CF and the "Model Input Extraction (mthly)" table?
+This message wasn't sent to Li, Eric Chi Nok. 
+[‎20/‎04/‎2020 6:03 PM]  Moore, Ross Haydon James:  
+what's the difference, in terms of the model runs or input MPF, between the Table_DET_CF and the "Model Input Extraction (mthly)" table? 
+This message wasn't sent to Li, Eric Chi Nok. 
+[‎20/‎04/‎2020 6:09 PM]  Moore, Ross Haydon James:  
+sorry, internet
+lost my connection
+what's the difference, in terms of the model runs or input MPF, between the Table_DET_CF and the "Model Input Extraction (mthly)" table?  
+ 
+[‎20/‎04/‎2020 6:14 PM]  Moore, Ross Haydon James:  
+Table_DET_CF seems to be the simple liability cashflows, but the extraction seems to include a large number of ZCB_PRICE_MN values - what are these (beyond some kind of ZCB of course)? And why are there 67 of some outputs (e.g. math_res), only 10 of others (e.g. totass_fac_pl)?
+ 
+[‎20/‎04/‎2020 6:17 PM]  Li, Eric Chi Nok:  
+[‎20/‎04/‎2020 6:02 PM]  Li, Eric Chi Nok:  
+"Table Input" tabs are actual tables read by the model 
+The action couldn’t be completed. Please try again later. 
+[‎20/‎04/‎2020 6:02 PM]  Li, Eric Chi Nok:  
+e.g. Table_DET_CF
+The action couldn’t be completed. Please try again later. 
+[‎20/‎04/‎2020 6:03 PM]  Li, Eric Chi Nok:  
+"Model Input" tabs are intermediate calculation results from ALS model. Those calculations were not covered in that spreadsheet just becoz the spreadsheet was intended only to compute the dynamic bonus-related calculations 
+The action couldn’t be completed. Please try again later. 
+[‎20/‎04/‎2020 6:04 PM]  Li, Eric Chi Nok:  
+But that's not what exactly the ALS model works
+The action couldn’t be completed. Please try again later. 
+[‎20/‎04/‎2020 6:04 PM]  Li, Eric Chi Nok:  
+those are supposedly to be output from other variables and feed into the variable to calculate dynamic bonus
+Moore, Ross Haydon James can't receive IMs right now. Status is unavailable or offline.  
+ 
+[‎20/‎04/‎2020 6:19 PM]  Li, Eric Chi Nok:  
+For ZCB_PRICE_MN, it is just an alternative to looking it up from a simulation table
+ 
+[‎20/‎04/‎2020 6:19 PM]  Moore, Ross Haydon James:  
+thanks for reposting everything that was missed!
+ 
+[‎20/‎04/‎2020 6:20 PM]  Li, Eric Chi Nok:  
+In the model tables, there is a file called "TABLES\ASSETS\20191231_HK_MC_Scenario_Base.fas". That's the simulation file. It contains the ZCB_PRICE (zero-coupon price) assumption by time
+ 
+ "b" and "c" are tenor in years and months[‎20/‎04/‎2020 6:23 PM]  Moore, Ross Haydon James:  
+and so the 67 "segments"/SP_CODE values are not the same as the "product grouping"?
+ 
+[‎20/‎04/‎2020 6:27 PM]  Li, Eric Chi Nok:  
+And why are there 67 of some outputs (e.g. math_res), only 10 of others (e.g. totass_fac_pl)? 
+>> to answer this question. I need to introduce the concept "pool" level - it's the aggregation level where asset and liability meets. In reality, insurers manage the business in sub-funds - that's the "pools" in ALS model. Each pool would include a portfolio of assets (asset segments) that back a group of liabilities (liability segments). The mapping is contained in LIAB table again. E.g. Segments 54 (MF2 USD) & 55 (MF2 HKD) are mapped to Pool 9 (MF2 fund). 
+ 
+[‎20/‎04/‎2020 6:27 PM]  Moore, Ross Haydon James:  
+so that's 10 asset pools
+and the link is found in liab_pool_1 I guess?
+ 
+[‎20/‎04/‎2020 6:29 PM]  Li, Eric Chi Nok:  
+For FWDHK, 19Q4, there are 67 liability segments. Out of that, there are 8 segments that are universal life and 9 segments that are non-Par. The rest is then mapped to 48 product series. The 67 liability segments are also mapped to 9 pools. With Pool 10 dedicated to serve CAA/DAA business. 
+Yes, the link is LIAB_POOL_1
+ 
+[‎20/‎04/‎2020 6:30 PM]  Li, Eric Chi Nok:  
+Indeed, POOL_2 as well. CAA/DAA is included as certain cash flows within each Par segments. This part of liability cash flows are linked to LIAB_POOL_2 (i.e. CAA/DAA pool). 
+But for the spreadsheet, its focus is dynamic bonus, on the major cash flows and it only looks at LIAB_POOL_1
+ 
+[‎20/‎04/‎2020 6:31 PM]  Moore, Ross Haydon James:  
+ah hah. ok.
+ 
+[‎20/‎04/‎2020 6:32 PM]  Moore, Ross Haydon James:  
+so i'm looking for the link between the liability model and the asset model
+on the assumption that the asset calculations are dependent on the liability results
+ 
+[‎20/‎04/‎2020 6:34 PM]  Moore, Ross Haydon James:  
+this spreadsheet takes as an input a full liability run over all time and a full asset run over all time, and then does some fairly simple calcs (e.g. investment return tab) to check the divident adjustment
+this spreadsheet doesn't have anything to do with any real links between the two models. is that because there is no further link? or because I'm looking at the wrong spreadsheet?
+ 
+[‎20/‎04/‎2020 6:36 PM]  Moore, Ross Haydon James:  
+(or the spreadsheet doesn't exist, it's only present in the ALS model itself in Prophet?)
+ 
+[‎20/‎04/‎2020 6:37 PM]  Li, Eric Chi Nok:  
+Perhaps I could put it like that: 
+In the model, it takes in full liability run results as an input (that's the DET_CF tables you have seen) and calculates both asset and the interactions between asset & liability (e.g. dynamic bonus). 
+ 
+[‎20/‎04/‎2020 6:39 PM]  Li, Eric Chi Nok:  
+It goes like   (T0) Asset -> (T0) dynamic bonus -> (T1) Adjusted liability --> (T1) asset --> (T1) dynamic bonus --> (T2) adjusted liability --> ...
+where Tx is the time projection 
+ 
+[‎20/‎04/‎2020 6:40 PM]  Moore, Ross Haydon James:  
+is there anything we have that articulates that bit, the T(o)->T(1) full set of calculations?
+ 
+[‎20/‎04/‎2020 6:40 PM]  Li, Eric Chi Nok:  
+This spreadsheet only focuses on "dynamic bonus". So the replicates the (T0) dynamic bonus, (T1) dynamic bonus, etc. parts, by reading in (T0), (t1), (t2) asset
+I am afraid not, we just have this dynamic bonus piece 
+So we do not have the flow of "adjusted liability --> asset" piece
+ 
+[‎20/‎04/‎2020 6:44 PM]  Li, Eric Chi Nok:  
+If you need so, I could try to create some simple illustrations on that piece, based on the Prophet coding. But it may take some time
+ 
+[‎20/‎04/‎2020 6:46 PM]  Moore, Ross Haydon James:  
+ok, thanks, good starter
+let me start with this, thx
+ 
+[‎20/‎04/‎2020 6:46 PM]  Li, Eric Chi Nok:  
+welcome
+do let me know if you need some illustrations on the rest of the model, like what i have just said 
+ 
+[‎21/‎04/‎2020 11:13 AM]  Moore, Ross Haydon James:  
+on ZCB_PRICE_MN, you say " "b" and "c" are tenor in years and months "
+does that mean no tenor less than 1 year?
+ 
+[‎21/‎04/‎2020 11:15 AM]  Li, Eric Chi Nok:  
+my fault
+(b-1)*12+c should means in the tenor in months
+ 
+[‎21/‎04/‎2020 11:16 AM]  Moore, Ross Haydon James:  
+ah, ok, thanks
+ 
+[‎21/‎04/‎2020 11:17 AM]  Li, Eric Chi Nok:  
+(b-1)*12+c should mean the tenor in months, so b=1 are for tenor < 1 years
+ 

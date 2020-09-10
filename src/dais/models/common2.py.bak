@@ -1,0 +1,281 @@
+from numba import jit, vectorize
+import pandas as pd
+import numpy as np
+import networkx as nx
+import inspect
+from collections import OrderedDict
+import time
+
+class BaseModel:
+	"""This is an outline class from which other models can inherit common functionality"""
+	def __init__(self):
+		self.colors={
+			't': 'orange',
+			'mpf': 'green',
+			'derived': 'red',
+			'table': 'blue',
+			'const': 'white'}
+		self.internal_graph=nx.DiGraph()
+		
+		self.jit_funcs=OrderedDict()
+		
+		self.out_vars=OrderedDict()
+		self.out_vals=OrderedDict()
+		
+		self.table_vars=OrderedDict()
+		self.table_vals=OrderedDict()
+		#table_mapper - a dict of dicts, showing key:field mappings for each table
+		self.table_mapper=OrderedDict()
+
+	def _process_mapper(self, tabname, row):
+		if row.Table in self.table_mapper:
+			self.table_mapper[tabname].update({row.Key:row.Mapping})
+		else:
+			self.table_mapper[tabname]={row.Key:row.Mapping}
+				
+	def _process_tables(self,tables,source):
+		Master=tables.pop('Master')
+		Keys=tables.pop('Keys')
+		tablekeys=OrderedDict()
+		flat_tables=OrderedDict()
+		if len(Master)>0:
+			for row in Keys.itertuples():
+				if row.Table in tablekeys:
+					tablekeys[row.Table].append(row.Key)
+				else:
+					tablekeys[row.Table]=[row.Key]
+			for record in Master.itertuples():
+				flat_tables[record.Table]={'table':tables[record.Table]
+										  ,'source':source
+										  ,'type':record.Type
+										  ,'keys':tablekeys[record.Table]}
+		return flat_tables
+		
+	def _flatter_tables(self,flat_tables,table_mappers,specials=['Description','DESCRIPTION']):
+		flatter_tables={}
+		for tabname in flat_tables.keys():
+			if flat_tables[tabname]['type']=='named_var':
+				out_tabs=[var for var in flat_tables[tabname]['table'].columns if var not in flat_tables[tabname]['keys']+specials]
+				for out_tab in out_tabs:
+					flatter_tables[out_tab]={'table': flat_tables[tabname]['table'][flat_tables[tabname]['keys']+[out_tab]]
+											 ,'keys': flat_tables[tabname]['keys']
+											 ,'type': flat_tables[tabname]['type']}
+					for row in table_mappers[table_mappers.Table==tabname].itertuples():
+						self._process_mapper(out_tab,row)
+			elif flat_tables[tabname]['type']=='dynamic':
+				flatter_tables[tabname]={
+					'table': flat_tables[tabname]['table'][[c for c in flat_tables[tabname]['table'].columns if c not in specials]].reset_index().set_index(flat_tables[tabname]['keys'])
+					,'keys': flat_tables[tabname]['keys']
+					,'type': flat_tables[tabname]['type']}
+				for row in table_mappers[table_mappers.Table==tabname].itertuples():
+					self._process_mapper(tabname,row)
+		self.table_vars.update(flatter_tables)
+		
+	def configure(self,constants,common_file,be_file,mappers):
+		self.CONSTANTS=constants
+		common_tables=pd.read_excel(common_file,sheet_name=None)
+		be_tables=pd.read_excel(be_file,sheet_name=None)
+		table_mappers=pd.read_excel(mappers,sheet_name='Mappers')
+		a=self._process_tables(common_tables,'common')
+		a.update(self._process_tables(be_tables,'be'))
+		self._flatter_tables(a,table_mappers)
+# 		self._process_mapper(table_mappers)
+		
+	def load_mpf(self,mpf_file,headers_and_size_only=False):
+		if headers_and_size_only:
+			mpf=pd.read_table(mpf_file,header=0,nrows=1)
+			self.mpf_fields=mpf.columns
+		else:
+			self.mpf=pd.read_table(mpf_file,header=0)
+			self.mpf_fields=self.mpf.columns
+			
+	def resolve_arg(self,arg):
+		if arg=='t':
+			return 't'
+		elif arg in self.mpf_fields:
+			return 'mpf'
+		elif arg in self.out_vars:
+			return 'derived'
+		elif arg in self.CONSTANTS:
+			return 'const'
+		elif arg in self.table_vars.keys():
+			return 'table'
+		else:
+			print(arg,'resolve fail')
+			return 'fail'
+		
+	
+	def execute(self):
+		tasklist = [task for task in nx.topological_sort(self.internal_graph)
+			if self.internal_graph.nodes[task]['table'] in ['derived','table']]
+# 		print(tasklist)
+		for task in tasklist:
+			print(task)
+			if self.internal_graph.nodes[task]['table'] == 'table':
+				mapping=self.table_vars[task]['keys']
+				#prepare source
+				source_dict=OrderedDict()
+				for key in mapping:
+					loc=self.resolve_arg(self.table_mapper[task][key])
+					if loc=='t':
+						source_dict[key]=self.t
+					elif loc=='mpf':
+						source_dict[key]=self.mpf[self.table_mapper[task][key]].to_numpy().reshape(self.mpf.shape[0])
+					elif loc=='const':
+						source_dict[key]=self.CONSTANTS[self.table_mapper[task][key]]
+					elif loc=='derived':
+						source_dict[key]=self.out_vals[self.table_mapper[task][key]].reshape(self.mpf.shape[0])
+					elif loc=='table':
+						source_dict[key]=self.table_vals[self.table_mapper[task][key]].reshape(self.mpf.shape[0])
+# 				print(task,source_dict)
+				#The inputs must be at constant or MPF level of granularity for this stage of join
+				#Broadcasting handles creating the source correctly
+				source=pd.DataFrame(source_dict,index=self.mpf.index)
+				#do the join
+				if self.table_vars[task]['type']=='named_var':
+					start=time.time()
+					self.table_vals[task]=pd.merge(source,
+							self.table_vars[task]['table'],
+							how='left',
+							on=self.table_vars[task]['keys'])[task].to_numpy().reshape((self.mpf.shape[0],1))
+					end=time.time()
+				elif self.table_vars[task]['type']=='dynamic':
+					start=time.time()
+					#we have the row key already, but not the index yet
+					#first get the row index
+					row_index=pd.merge(source,
+							self.table_vars[task]['table']['index'],
+							how='left',
+							left_on=self.table_vars[task]['keys'],
+							right_index=True)['index'].to_numpy()
+# 							.astype(np.int64)
+# 					print(source.values[[18:22],:])
+					print('row_index: ',row_index[19])
+					#now the column index
+					colindx=pd.DataFrame({
+						self.table_mapper[task]['col']:[col for col in self.table_vars[task]['table'].columns if col not in ['DESCRIPTION','Description','index']]
+					}).reset_index()
+					colname=self.table_mapper[task]['col']
+					loc=self.resolve_arg(colname)
+					if loc=='t':
+						colsource=self.t
+					elif loc=='mpf':
+						colsource=self.mpf[colname].to_numpy()
+						#missing 'constant' option
+					elif loc=='derived':
+						colsource=self.out_vals[colname]
+					elif loc=='table':
+						colsource=self.table_vals[colname]
+# 					print('colsource',colsource.shape)
+					if colsource.ndim==1:
+						output_shape=colsource.shape
+					elif colsource.ndim==2 and (colsource.shape[1]>1):
+						output_shape=colsource.shape
+						print('colsource: ',colsource[19])
+						colsource=colsource.reshape((self.mpf.shape[0]*self.CONSTANTS['t_range']))
+						newrow_index=np.zeros(output_shape,dtype=np.int64)
+						#now broadcast it into the right shape before reshaping to long for the join. Rows now synchronised to cols.
+						newrow_index[:,:]=row_index.reshape((output_shape[0],1))
+						row_index=newrow_index.reshape((self.mpf.shape[0]*self.CONSTANTS['t_range']))
+					elif colsource.ndim==2 and (colsource.shape[1]==1):
+						colsource=colsource.reshape((colsource.shape[0]))
+						output_shape=colsource.shape
+# 					print('output_shape',output_shape)
+					scolsource=pd.DataFrame(data={colname:colsource}).reset_index().rename(columns={'index':'sourceindex'})
+
+					cols=pd.merge_ordered(left=scolsource
+									,right=colindx
+									,fill_method='ffill'
+									,how='left',on=[colname]).sort_values('sourceindex')['index'].to_numpy().astype(np.int64)
+# 					print(self.table_vars[task]['table'].to_numpy())
+					print(row_index, cols)
+# 					print(min(row_index),np.argmin(cols))
+					self.table_vals[task]=self.table_vars[task]['table'].to_numpy()[row_index,cols].reshape(output_shape)
+					end=time.time()
+# 				print(task, end-start)
+			elif self.internal_graph.nodes[task]['table'] == 'derived':
+				args=self.internal_graph.in_edges(nbunch=task,data=True)
+				args=[arg for arg,func,attr in sorted(args, key=lambda item: item[2]['order'])]
+				resolved_args=[]
+				for arg in args:
+					source=self.resolve_arg(arg)
+# 					print(task,arg,source)
+					if source=='t':
+						resolved_args.append(self.t)
+					elif source=='mpf':
+						resolved_args.append(self.mpf[arg].to_numpy().reshape((self.mpf.shape[0],1)))
+					elif source=='const':
+						resolved_args.append(self.CONSTANTS[arg])
+					elif source=='derived':
+						resolved_args.append(self.out_vals[arg])
+					elif source=='table':
+						resolved_args.append(self.table_vals[arg])
+				#LAUNCH THE TASK
+				start=time.time()
+				self.out_vals[task][:,:]=self.jit_funcs[task](*resolved_args)
+				end=time.time()
+# 				print(task, end-start)
+		
+		
+		
+	def initialise(self):
+		#check everything is set up and makes sense
+		#to implement later!!
+		#set up outputs
+		#set up time
+		self.t=np.zeros((self.mpf.shape[0],self.CONSTANTS['t_range']),dtype=np.int32)
+		self.t[:,:]=np.arange(1,self.CONSTANTS['t_range']+1,dtype=np.int32)
+		for var in self.out_vars.keys():
+			if self.out_vars[var]['shape']==1:
+				self.out_vals[var]=np.zeros((self.mpf.shape[0],1),dtype=self.out_vars[var]['type'])
+			elif self.out_vars[var]['shape']==2:
+				self.out_vals[var]=np.zeros((self.mpf.shape[0],self.CONSTANTS['t_range']),dtype=self.out_vars[var]['type'])
+	
+	def setfuncs(self,model_class):
+		self.functions_class=model_class
+		self._inspect()
+			
+	def _inspect(self):
+		functions=OrderedDict(inspect.getmembers(self.functions_class,inspect.isfunction))
+		singles=self.functions_class.single_derivations
+		
+		self.out_vars.update(singles)
+		for funcname in singles.keys():
+			args=list(inspect.signature(functions[funcname]).parameters.keys())
+			if singles[funcname]['numba']=='v':
+				self.jit_funcs[funcname]=vectorize(functions[funcname])
+			table='derived'
+			self.internal_graph.add_node(funcname,style='filled'
+				,table=table,fillcolor=self.colors[table]
+				,func_code=inspect.getsource(functions[funcname]))
+			for i, arg in enumerate(args):
+				if arg in self.internal_graph.nodes:
+					pass
+				else:
+					table=self.resolve_arg(arg)
+					self.internal_graph.add_node(arg,table=table,style='filled',fillcolor=self.colors[table])
+				self.internal_graph.add_edge(arg,funcname,order=i)
+		#now go back through the graph and resolve the mapped join keys for the tables
+		tables_to_fix = [n for n,d in self.internal_graph.nodes(data=True) if (d['table']=='table') and (len(list(self.internal_graph.predecessors(n)))==0)]
+		while(len(tables_to_fix)>0):
+			self._resolve_table(tables_to_fix)
+			tables_to_fix = [n for n,d in self.internal_graph.nodes(data=True) if (d['table']=='table') and (len(list(self.internal_graph.predecessors(n)))==0)]
+		
+	def _resolve_table(self,tables_to_fix):
+		print('Fixing tables: ', tables_to_fix)
+		for tablenode in tables_to_fix:
+			for key in self.table_mapper[tablenode].values():
+				if key in self.internal_graph.nodes:
+					pass
+				else:
+					table=self.resolve_arg(key)
+					self.internal_graph.add_node(key,table=table,style='filled',fillcolor=self.colors[table])
+# 				print(tablenode,key)
+				self.internal_graph.add_edge(key,tablenode)
+
+	
+	def visualise(self):
+		A=nx.nx_agraph.to_agraph(self.internal_graph)
+		return A.draw(format='png',prog='dot')
+		
+		
