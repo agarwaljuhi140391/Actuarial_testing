@@ -18,11 +18,14 @@ class OutputTest(unittest.TestCase):
         self.match = {}
     def test_run(self):
         for key in self.td.keys():
-            if np.array_equal(self.td.get(key),self.d.get(key).squeeze()):
+            if np.array_equal(self.td.get(key).round(decimals=12),self.d.get(key).round(decimals=12)):
                 self.match[key]=1
             else:
                 self.match[key]=0
         match_keys = [key for key in self.td.keys() if self.match[key]==1]
+        unmatched_keys = [key for key in self.td.keys() if self.match[key]==0]
+        print("Matched fields: ",match_keys)
+        print("Unmatched fields: ", unmatched_keys)
         self.assertTrue(len(match_keys)==len(self.td.keys()))
 
 
@@ -31,7 +34,7 @@ if __name__ == '__main__':
     df1 = pd.read_excel(args.ground_truth_filename, 'static', header=None)
     td1={}
     for i in range(len(df1)):
-        td1[df1.iloc[i,0]] = df1.iloc[i,1]
+        td1[df1.iloc[i,0]] = np.array(df1.iloc[i,1]).reshape(1,1)
     df2 = dict(pd.read_excel(args.ground_truth_filename, 'dynamic'))
     td2 = {key:df2[key].values[:1200].reshape(1,1200) for key in df2.keys()}
     td = {**td1, **td2}
