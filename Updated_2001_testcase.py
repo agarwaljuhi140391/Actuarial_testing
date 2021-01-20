@@ -51,10 +51,10 @@ if __name__ == '__main__':
     test_loader = unittest.TestLoader()
     #test_names = test_loader.getTestCaseNames(OutputTest)
     suite = unittest.TestSuite()
-    for testcase in len(d):
-        func_name = d['testcase'][0]['func_name']
-        inp = d['testcase'][0]['inputs']
-        exp_out = d['testcase'][0]['outputs']
+    for id in len(d):
+        func_name = d['testcase'][id]['func_name']
+        inp = d['testcase'][id]['inputs']
+        exp_out = d['testcase'][id]['outputs']
         suite.addTest(OutputTest(str('test_' + func_name), inp,exp_out))
     unittest.TextTestRunner().run(suite)
     
